@@ -1,0 +1,206 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creates environment for EC2 Container Service
+Mappings:
+  AmazonLinuxAMI:
+    #ap-northeast-1: {AMI: ami-78ba6619}
+    #ap-southeast-1: {AMI: ami-56e84c35}
+    #ap-southeast-2: {AMI: ami-2589b946}
+    #eu-central-1: {AMI: ami-d9d62ab6}
+    #eu-west-1: {AMI: ami-b9bd25ca}
+    #us-east-1: {AMI: ami-50b4f047}
+    #us-west-1: {AMI: ami-699ad409}
+    us-west-2: {AMI: ami-7abc111a}
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label: {default: SSH Access}
+      Parameters: [KeyName, SSHLocation]
+    - Label: {default: 'VPC, Subnets, and Instance'}
+      Parameters: [VpcId, Subnets, ECSInstanceType]
+    #- Label: {default: 'VPC, Subnets, and Instance'}
+    #  Parameters: [VpcId, Subnets, ECSInstanceType]
+    #- Label: {default: Data and Config}
+    #  Parameters: [DataUrl, TrainingConfigUrl]
+    ParameterLabels:
+      #DataUrl: {default: Data URL}
+      ECSInstanceType: {default: ECS instance type}
+      KeyName: {default: Key name}
+      SSHLocation: {default: SSH CIDR range}
+      Subnets: {default: Subnets}
+      #TrainingConfigUrl: {default: Training config URL}
+      VpcId: {default: VPC}
+  Maintainer: {Description: Vithu Thangarasa}
+Outputs:
+  CloudWatchLogsGroup:
+    Description: Name of the CloudWatch Logs Group
+    Value: {Ref: CloudWatchLogsGroup}
+  #DsstneTaskDefinition:
+  #  Description: The task definition for Amazon DSSTNE
+  #  Value: {Ref: ECSTaskDefinitionDsstne}
+  #ECRRepository:
+  #  Description: The ECR Repository for the Amazon DSSTNE container
+  #  Value: {Ref: ECRRepository}
+  ECSClusterName:
+    Description: Name of the ECS cluster
+    Value: {Ref: ECSCluster}
+  #S3BucketResults:
+  #  Description: The S3 bucket for storing results
+  #  Value: {Ref: S3BucketResults}
+Parameters:
+  #DataUrl: {ConstraintDescription: Must be valid URL, Default: 'https://s3-us-west-2.amazonaws.com/amazon-dsstne-samples/data/ml20m-all',
+  #  Description: Neural Network Modeling data URL, Type: String}
+  ECSInstanceType:
+    AllowedValues: [g2.2xlarge, g2.8xlarge, p2.xlarge, p2.8xlarge, p2.16xlarge]
+    ConstraintDescription: Must be g2.2xlarge, g2.8xlarge, p2.xlarge, p2.8xlarge,
+      p2.16xlarge
+    Default: g2.2xlarge
+    Description: ECS instance type
+    Type: String
+  KeyName: {Description: Name of an existing EC2 KeyPair, Type: 'AWS::EC2::KeyPair::KeyName'}
+  SSHLocation: {AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})',
+    ConstraintDescription: Must be a valid CIDR range of the form x.x.x.x/x, Default: 0.0.0.0/0,
+    Description: Restrict SSH access to CIDR range (default can be accessed from anywhere),
+    MaxLength: '18', MinLength: '9', Type: String}
+  Subnets: {ConstraintDescription: Must be a list of existing subnets in the selected
+      Virtual Private Cloud, Description: Please make sure you select 1 or more subnets in the Virtual Private Cloud (VPC) ID you chose above, 
+      Type: 'List<AWS::EC2::Subnet::Id>'}
+  #TrainingConfigUrl: {ConstraintDescription: Must be a valid URL, Default: 'https://s3-us-west-2.amazonaws.com/amazon-dsstne-samples/configs/config.json',
+  #  Description: Training config URL, Type: String}
+  VpcId: {ConstraintDescription: Must be the VPC ID of an existing Virtual Private
+      Cloud, Description: VPC ID of your existing Virtual Private Cloud (VPC), Type: 'AWS::EC2::VPC::Id'}
+Resources:
+  CloudWatchLogsGroup:
+    Properties: {RetentionInDays: 7}
+    Type: AWS::Logs::LogGroup
+  #ECRRepository: {Type: 'AWS::ECR::Repository'}
+  ECSCluster: {Type: 'AWS::ECS::Cluster'}
+  ECSInstanceAutoScalingGroup:
+    CreationPolicy:
+      ResourceSignal: {Count: '1', Timeout: PT120M}
+    Properties:
+      DesiredCapacity: '1'
+      LaunchConfigurationName: {Ref: ECSInstanceLaunchConfiguration}
+      MaxSize: '1'
+      MinSize: '1'
+      Tags:
+      - Key: Name
+        PropagateAtLaunch: 'true'
+        Value: {Ref: 'AWS::StackName'}
+      VPCZoneIdentifier: {Ref: Subnets}
+    Type: AWS::AutoScaling::AutoScalingGroup
+  ECSInstanceLaunchConfiguration:
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /etc/ecs/ecs.config:
+              content:
+                Fn::Join:
+                - ''
+                - - ECS_CLUSTER=
+                  - {Ref: ECSCluster}
+                  - '
+
+                    '
+                  - 'ECS_AVAILABLE_LOGGING_DRIVERS=["json-file","awslogs"]
+
+                    '
+              group: root
+              mode: '000644'
+              owner: root
+            /home/ec2-user/.aws/config:
+              content:
+                Fn::Join:
+                - ''
+                - - '[default]
+
+                    '
+                  - 'region = '
+                  - {Ref: 'AWS::Region'}
+                  - '
+
+                    '
+              group: root
+              mode: '000644'
+              owner: ec2-user
+            /root/.aws/config:
+              content:
+                Fn::Join:
+                - ''
+                - - '[default]
+
+                    '
+                  - 'region = '
+                  - {Ref: 'AWS::Region'}
+                  - '
+
+                    '
+              group: root
+              mode: '000644'
+              owner: root
+          packages:
+            yum:
+              docker: []
+              ecs-init: []
+              git: []
+          services:
+            sysvinit:
+              docker: {enabled: 'true', ensureRunning: 'true'}
+    Properties:
+      BlockDeviceMappings:
+      - DeviceName: /dev/xvda
+        Ebs: {VolumeSize: '30'}
+      IamInstanceProfile: {Ref: ECSInstanceProfile}
+      ImageId:
+        Fn::FindInMap:
+        - AmazonLinuxAMI
+        - {Ref: 'AWS::Region'}
+        - AMI
+      InstanceType: {Ref: ECSInstanceType}
+      KeyName: {Ref: KeyName}
+      SecurityGroups:
+      - {Ref: ECSInstanceSecurityGroup}
+    Type: AWS::AutoScaling::LaunchConfiguration
+  ECSInstanceProfile:
+    DependsOn: ECSInstanceRole
+    Properties:
+      Path: /
+      Roles:
+      - {Ref: ECSInstanceRole}
+    Type: AWS::IAM::InstanceProfile
+  ECSInstanceRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [ec2.amazonaws.com]
+        Version: '2012-10-17'
+      ManagedPolicyArns: ['arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role']
+      Path: /
+    Type: AWS::IAM::Role
+  ECSInstanceSecurityGroup:
+    Properties:
+      GroupDescription: Security Group for ECSInstance
+      SecurityGroupIngress:
+      - CidrIp: {Ref: SSHLocation}
+        FromPort: '22'
+        IpProtocol: tcp
+        ToPort: '22'
+      Tags:
+      - {Key: Name, Value: ECSInstanceSecurityGroup}
+      VpcId: {Ref: VpcId}
+    Type: AWS::EC2::SecurityGroup
+  ECSServiceRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [ecs.amazonaws.com]
+        Version: '2012-10-17'
+      ManagedPolicyArns: ['arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole']
+      Path: /
+    Type: AWS::IAM::Role
